@@ -3,16 +3,16 @@
 import { useState, useRef } from "react";
 
 interface FileUploadProps {
-  onUploadSuccess?: (filename: string) => void;
   onUploadError?: (error: string) => void;
+  onUploaded?: (data: { url: string }) => void;
   accept?: string;
   multiple?: boolean;
   className?: string;
 }
 
 export default function FileUpload({
-  onUploadSuccess,
   onUploadError,
+  onUploaded,
   accept,
   multiple = false,
   className = "",
@@ -21,7 +21,9 @@ export default function FileUpload({
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
@@ -40,7 +42,9 @@ export default function FileUpload({
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: "Upload failed" }));
+        const errorData = await response
+          .json()
+          .catch(() => ({ error: "Upload failed" }));
         throw new Error(errorData.error || "Upload failed");
       }
 
@@ -50,10 +54,11 @@ export default function FileUpload({
         : `Successfully uploaded ${result.filenames[0]}`;
 
       setUploadStatus(successMessage);
-      
-      if (onUploadSuccess) {
+
+      if (onUploaded) {
         result.filenames.forEach((filename: string) => {
-          onUploadSuccess(filename);
+          const url = `/data/${filename}`;
+          onUploaded({ url });
         });
       }
 
@@ -62,9 +67,10 @@ export default function FileUpload({
         fileInputRef.current.value = "";
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
+      const errorMessage =
+        error instanceof Error ? error.message : "An unknown error occurred";
       setUploadStatus(`Error: ${errorMessage}`);
-      
+
       if (onUploadError) {
         onUploadError(errorMessage);
       }
@@ -97,11 +103,14 @@ export default function FileUpload({
         {isUploading ? "Uploading..." : "Choose File" + (multiple ? "s" : "")}
       </button>
       {uploadStatus && (
-        <p className={`mt-2 text-sm ${uploadStatus.startsWith("Error") ? "text-red-600" : "text-green-600"}`}>
+        <p
+          className={`mt-2 text-sm ${
+            uploadStatus.startsWith("Error") ? "text-red-600" : "text-green-600"
+          }`}
+        >
           {uploadStatus}
         </p>
       )}
     </div>
   );
 }
-

@@ -9,14 +9,11 @@ export async function POST(request: NextRequest) {
     const files = formData.getAll("files") as File[];
 
     if (files.length === 0) {
-      return NextResponse.json(
-        { error: "No files provided" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No files provided" }, { status: 400 });
     }
 
     // Ensure /data directory exists
-    const dataDir = join(process.cwd(), "data");
+    const dataDir = join(process.cwd(), "../agent/data");
     if (!existsSync(dataDir)) {
       await mkdir(dataDir, { recursive: true });
     }
@@ -52,4 +49,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

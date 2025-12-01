@@ -27,11 +27,15 @@ import {
   BaseCheckpointSaver,
   Checkpoint,
 } from "@langchain/langgraph-checkpoint";
-import { readFileSync, writeFileSync } from "fs";
+import { readFile, readFileSync, writeFileSync } from "fs";
 import { RedisSaver } from "@langchain/langgraph-checkpoint-redis";
 
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
+
+import { CanvasFactory } from "pdf-parse/worker";
+import { PDFParse } from "pdf-parse";
+import { join } from "path";
 
 type LearningPlan = {
   topic: string;
@@ -50,6 +54,8 @@ const LearningPlanSchema = z.object({
 //    provide actions to the state.
 const AgentStateAnnotation = Annotation.Root({
   ...CopilotKitStateAnnotation.spec, // CopilotKit state annotation already includes messages, as well as frontend tools
+  resourceUrl: Annotation<string | null>,
+  resourceContent: Annotation<string | null>,
   approved: Annotation<boolean>,
   learningPlan: Annotation<LearningPlan>,
   step: Annotation<string>,
@@ -58,8 +64,39 @@ const AgentStateAnnotation = Annotation.Root({
 // 2. Define the type for our agent state
 export type AgentState = typeof AgentStateAnnotation.State;
 
+async function ingestPdf(state: AgentState) {
+  if (state.resourceContent) {
+    return new Command({
+      goto: "create_learning_plan",
+      update: {
+        resourceContent: state.resourceContent,
+      },
+    });
+  }
+
+  const contentUri = interrupt("__interrupt_required_resource_uri");
+  if (!contentUri) {
+    return new Command({
+      goto: "ingestPdf",
+    });
+  }
+
+  const resolvedPath = join(process.cwd(), contentUri);
+  const readContent = new PDFParse({
+    data: readFileSync(resolvedPath),
+    CanvasFactory,
+  });
+  const content = (await readContent.getText()).pages
+    .map((page) => page.text)
+    .join("\n");
+  return {
+    ...state,
+    resourceUrl: contentUri,
+    resourceContent: content,
+  };
+}
+
 async function createLearningPlan(state: AgentState) {
-  console.info("Entered createLearningPlan");
   if (state.learningPlan) {
     if (state.approved === true) {
       return new Command({
@@ -85,14 +122,18 @@ async function createLearningPlan(state: AgentState) {
     .withStructuredOutput(LearningPlanSchema)
     .invoke([
       new SystemMessage(
-        `Create a learning plan for the user based on the following topics: HTML. One topic should be completed by 2-3 MCQ`
+        `Create a learning plan for the user based on the following resource: ${state.resourceContent}. One topic should be completed by 2-3 MCQ.
+        Target 3 to 5 learning topics.`
       ),
       ...state.messages,
     ]);
 
   return {
     ...state,
-    messages: [...state.messages, new AIMessage(`Here is the learning plan.`)],
+    messages: [
+      ...state.messages,
+      new AIMessage(`I have updated the learning plan.`),
+    ],
     learningPlan: learningPlan.learningPlan.map((topic) => ({
       topic: topic.topic,
       completed: false,
@@ -103,11 +144,7 @@ async function createLearningPlan(state: AgentState) {
 
 // 5. Define the chat node, which will handle the chat logic
 async function approval_node(state: AgentState, config: RunnableConfig) {
-  console.info("Entered approval_node 🟠🟠🟠🟠🟠🟠🟠🟠🟠🟠🟠🟠");
-  const approved = interrupt(
-    "Are you sure you want to approve this Learning Plan?"
-  );
-  // 5.5 Return the response, which will be added to the state
+  const approved = interrupt("__interrupt_required_approval");
   return {
     ...state,
     approved: approved.toLowerCase().includes("yes"),
@@ -129,16 +166,42 @@ async function requireAllTopicsCompleted({ learningPlan }: AgentState) {
 }
 // Define the workflow graph
 const workflow = new StateGraph(AgentStateAnnotation)
+  .addNode("ingestPdf", ingestPdf)
   .addNode("create_learning_plan", createLearningPlan)
   .addNode("approval_node", approval_node)
-  .addNode("handle_topic", (state) => {
+  .addNode("handle_topic", async (state) => {
+    console.log(state.learningPlan);
     const nextTopic = state.learningPlan.find((topic) => !topic.completed);
     if (!nextTopic) {
       return state;
     }
-    const response = interrupt(`Handle the topic: ${nextTopic.topic}`);
 
-    const isResponseValid = response.toLowerCase().includes("yes");
+    const response = await new ChatOpenAI({
+      temperature: 1,
+      model: "gpt-5-mini",
+      apiKey: process.env.OPEN_AI_KEY,
+    })
+      .withStructuredOutput(
+        z.object({
+          question: z.string(),
+          choices: z.array(z.string()),
+          correctChoice: z.string(),
+        })
+      )
+      .invoke([
+        new SystemMessage(
+          `Create a question and choices for the user to answer about the topic: ${nextTopic.topic} & source material: ${state.resourceContent}`
+        ),
+        ...state.messages,
+      ]);
+
+    const userResponse = interrupt({
+      type: "__interrupt_required_topic_completion",
+      value: response.question,
+      choices: response.choices,
+    });
+
+    const isResponseValid = response.correctChoice === userResponse;
     return {
       ...state,
       learningPlan: state.learningPlan.map((topic) => {
@@ -168,7 +231,8 @@ const workflow = new StateGraph(AgentStateAnnotation)
       messages: [...state.messages, response],
     };
   })
-  .addEdge(START, "create_learning_plan")
+  .addEdge(START, "ingestPdf")
+  .addEdge("ingestPdf", "create_learning_plan")
   .addEdge("create_learning_plan", "approval_node")
   .addEdge("approval_node", "handle_topic")
   .addEdge("review", END)
