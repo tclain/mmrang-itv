@@ -1,0 +1,19 @@
+{
+  "name": "langgraph-js-starter",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:studio": "turbo run dev --filter=web -- & cd apps/agent && npx @langchain/langgraph-cli dev --port 8123",
+    "build": "turbo run build",
+    "lint": "turbo run lint"
+  },
+  "devDependencies": {
+    "@langchain/langgraph-cli": "^1.0.4",
+    "turbo": "^2.3.3"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
