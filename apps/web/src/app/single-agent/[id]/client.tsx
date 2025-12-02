@@ -211,7 +211,7 @@ export function CopilotKit() {
               </span>
             </div>
             <h3 className="text-lg font-semibold mb-4">❓ {question}</h3>
-            <div className="space-y-2">
+            <div className="flex space-x-2">
               {choices.map((choice: string, idx: number) => (
                 <button
                   onClick={() => handleMCQSelect(choice)}
