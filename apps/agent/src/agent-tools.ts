@@ -61,10 +61,25 @@ const AgentStateAnnotation = Annotation.Root({
   step: Annotation<string>,
 });
 
-// 2. Define the type for our agent state
 export type AgentState = typeof AgentStateAnnotation.State;
 
-async function ingestPdf(state: AgentState) {
+function handlToolsOrNext(successNode: string) {
+  return function ({ messages, copilotkit }: AgentState) {
+    // 6.1 Get the last message from the state
+    const lastMessage = messages[messages.length - 1] as AIMessage;
+
+    // 7.2 If the LLM makes a tool call, then we route to the "tools" node
+    if (lastMessage.tool_calls?.length) {
+      // Actions are the frontend tools coming from CopilotKit
+      const actions = copilotkit?.actions;
+      const toolCallName = lastMessage.tool_calls![0].name;
+      return "__end__";
+    }
+    return successNode;
+  };
+}
+
+async function askToIngestPdf(state: AgentState) {
   if (state.resourceContent) {
     return new Command({
       goto: "create_learning_plan",
@@ -74,11 +89,27 @@ async function ingestPdf(state: AgentState) {
     });
   }
 
-  const contentUri = interrupt("__interrupt_required_resource_uri");
+  const modelWithTools = new ChatOpenAI({
+    temperature: 1,
+    model: "gpt-5-mini",
+    apiKey: process.env.OPEN_AI_KEY,
+  })
+    .bindTools([
+      ...convertActionsToDynamicStructuredTools(
+        state.copilotkit?.actions ?? []
+      ),
+    ])
+    .invoke([
+      new SystemMessage(`You are a document processing assistant.
+        Call the ingest_pdf tool to get the URI of the pdf file to work on.`),
+      ...state.messages,
+    ]);
+}
+
+async function extractContentFromUri(state: AgentState) {
+  const contentUri = state.resourceUrl;
   if (!contentUri) {
-    return new Command({
-      goto: "ingestPdf",
-    });
+    return state;
   }
 
   const resolvedPath = join(process.cwd(), contentUri);
@@ -164,80 +195,90 @@ async function requireAllTopicsCompleted({ learningPlan }: AgentState) {
   }
   return "handle_topic";
 }
+
+export async function handleTopic(state: AgentState, config: RunnableConfig) {
+  console.log(state.learningPlan);
+  const nextTopic = state.learningPlan.find((topic) => !topic.completed);
+  if (!nextTopic) {
+    return state;
+  }
+
+  const response = await new ChatOpenAI({
+    temperature: 1,
+    model: "gpt-5-mini",
+    apiKey: process.env.OPEN_AI_KEY,
+  })
+    .withStructuredOutput(
+      z.object({
+        question: z.string(),
+        choices: z.array(z.string()),
+        correctChoice: z.string(),
+      })
+    )
+    .invoke([
+      new SystemMessage(
+        `Create a question and choices for the user to answer about the topic: ${nextTopic.topic} & source material: ${state.resourceContent}`
+      ),
+      ...state.messages,
+    ]);
+
+  const userResponse = interrupt({
+    type: "__interrupt_required_topic_completion",
+    value: response.question,
+    choices: response.choices,
+  });
+
+  const isResponseValid = response.correctChoice === userResponse;
+  return {
+    ...state,
+    learningPlan: state.learningPlan.map((topic) => {
+      return {
+        ...topic,
+        completed:
+          topic.topic === nextTopic.topic ? isResponseValid : topic.completed,
+      };
+    }),
+  };
+}
+
+export async function review(state: AgentState, config: RunnableConfig) {
+  // 5.4 Invoke the model with the system message and the messages in the state
+  const response = await new ChatOpenAI({
+    temperature: 1,
+    model: "gpt-5-mini",
+    apiKey: process.env.OPEN_AI_KEY,
+  }).invoke(
+    `Review the learning plan and explain to the user what they learn today ${JSON.stringify(
+      state.learningPlan
+    )}`,
+    config
+  );
+
+  return {
+    ...state,
+    messages: [...state.messages, response],
+  };
+}
 // Define the workflow graph
 const workflow = new StateGraph(AgentStateAnnotation)
-  .addNode("ingestPdf", ingestPdf)
+  .addNode("ingestPdf", askToIngestPdf)
+  .addNode("extractContentFromUri", extractContentFromUri)
   .addNode("create_learning_plan", createLearningPlan)
-  .addNode("approval_node", approval_node)
-  .addNode("handle_topic", async (state) => {
-    console.log(state.learningPlan);
-    const nextTopic = state.learningPlan.find((topic) => !topic.completed);
-    if (!nextTopic) {
-      return state;
-    }
+  .addEdge("extractContentFromUri", "create_learning_plan")
+  .addConditionalEdges("create_learning_plan", requiresLearningPlanApproval)
+  .addConditionalEdges("ingestPdf", handlToolsOrNext("extractContentFromUri"));
 
-    const response = await new ChatOpenAI({
-      temperature: 1,
-      model: "gpt-5-mini",
-      apiKey: process.env.OPEN_AI_KEY,
-    })
-      .withStructuredOutput(
-        z.object({
-          question: z.string(),
-          choices: z.array(z.string()),
-          correctChoice: z.string(),
-        })
-      )
-      .invoke([
-        new SystemMessage(
-          `Create a question and choices for the user to answer about the topic: ${nextTopic.topic} & source material: ${state.resourceContent}`
-        ),
-        ...state.messages,
-      ]);
-
-    const userResponse = interrupt({
-      type: "__interrupt_required_topic_completion",
-      value: response.question,
-      choices: response.choices,
-    });
-
-    const isResponseValid = response.correctChoice === userResponse;
-    return {
-      ...state,
-      learningPlan: state.learningPlan.map((topic) => {
-        return {
-          ...topic,
-          completed:
-            topic.topic === nextTopic.topic ? isResponseValid : topic.completed,
-        };
-      }),
-    };
-  })
-  .addNode("review", async (state, config) => {
-    // 5.4 Invoke the model with the system message and the messages in the state
-    const response = await new ChatOpenAI({
-      temperature: 1,
-      model: "gpt-5-mini",
-      apiKey: process.env.OPEN_AI_KEY,
-    }).invoke(
-      `Review the learning plan and explain to the user what they learn today ${JSON.stringify(
-        state.learningPlan
-      )}`,
-      config
-    );
-
-    return {
-      ...state,
-      messages: [...state.messages, response],
-    };
-  })
-  .addEdge(START, "ingestPdf")
-  .addEdge("ingestPdf", "create_learning_plan")
-  .addEdge("create_learning_plan", "approval_node")
-  .addEdge("approval_node", "handle_topic")
-  .addEdge("review", END)
-  .addConditionalEdges("approval_node", requiresLearningPlanApproval)
-  .addConditionalEdges("handle_topic", requireAllTopicsCompleted);
+// .addNode("create_learning_plan", createLearningPlan)
+// .addNode("approval_node", approval_node)
+// .addNode("handle_topic", handleTopic)
+// .addNode("review", async (state, config) => {})
+// .addEdge(START, "ingestPdf")
+// .addEdge("ingestPdf", "create_learning_plan")
+// .addEdge("create_learning_plan", "approval_node")
+// .addEdge("approval_node", "handle_topic")
+// .addEdge("review", END)
+// .addConditionalEdges("approval_node", requiresLearningPlanApproval)
+// .addConditionalEdges("handle_topic", requireAllTopicsCompleted);
 
 const sqliteSaver = SqliteSaver.fromConnString("./agent.db");
 

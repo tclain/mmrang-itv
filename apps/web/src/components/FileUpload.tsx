@@ -57,7 +57,10 @@ export default function FileUpload({
 
       if (onUploaded) {
         result.filenames.forEach((filename: string) => {
-          const url = `/data/${filename}`;
+          // Return path relative to agent's working directory
+          // Files are stored in ../agent/data relative to web app
+          // Agent runs from apps/agent/, so path should be data/filename
+          const url = `data/${filename}`;
           onUploaded({ url });
         });
       }

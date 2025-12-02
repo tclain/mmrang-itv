@@ -1,24 +1,24 @@
 "use client";
 
 import FileUpload from "@/components/FileUpload";
-import { useCoAgent, useLangGraphInterrupt } from "@copilotkit/react-core";
+import {
+  useCoAgent,
+  useCopilotChat,
+  useFrontendTool,
+  useLangGraphInterrupt,
+} from "@copilotkit/react-core";
 import { CopilotChat } from "@copilotkit/react-ui";
-import { useEffect, useRef } from "react";
-import { AgentState } from "../../../../agent/src/agent";
 
-export const useOnce = (fn: () => void) => {
-  const doneRef = useRef(false);
-  useEffect(() => {
-    if (!doneRef.current) {
-      fn();
-      doneRef.current = true;
-    }
-  }, []);
-};
+import { TextMessage, MessageRole } from "@copilotkit/runtime-client-gql";
+
+import type { AgentState } from "../../../../agent/src/agent-interrupt";
+import { useEffect } from "react";
 
 export function CopilotKit() {
+  const chat = useCopilotChat();
   const agentState = useCoAgent<AgentState>({
     name: "starterAgent",
+
   });
 
   useLangGraphInterrupt({
@@ -49,8 +49,8 @@ export function CopilotKit() {
       if (args.event.value.type === "__interrupt_required_topic_completion") {
         return (
           <>
-            <p>Question: {args.event.value.value}?</p>
-            {args.event.value.choices?.map((choice) => (
+            <p>{args.event.value.value}?</p>
+            {args.event.value.choices?.map((choice: string) => (
               <button key={choice} onClick={() => args.resolve(choice)}>
                 {choice}
               </button>
@@ -58,35 +58,34 @@ export function CopilotKit() {
           </>
         );
       }
-      return null;
+      return "";
     },
   });
 
-  // useLangGraphInterrupt({
-  //   enabled: (event) => {
-  //     return event.eventValue === "__interrupt_required_approval";
-  //   },
-  //   render: (args) => {
-  //     return (
-  //       <div>
-  //         <button
-  //           onClick={() => {
-  //             args.resolve("Yes");
-  //           }}
-  //         >
-  //           Yes
-  //         </button>
-  //         <button
-  //           onClick={() => {
-  //             args.resolve("No");
-  //           }}
-  //         >
-  //           No
-  //         </button>
-  //       </div>
-  //     );
-  //   },
-  // });
+  useEffect(() => {
+    if (!agentState.state.messages?.length) {
+      chat.appendMessage(
+        new TextMessage({
+          role: MessageRole.System,
+          content: "Start the workflow",
+        })
+      );
+    }
+  }, [agentState.state.messages]);
+
+  useFrontendTool({
+    name: "ingest_pdf",
+    description: "Ingest a PDF file",
+    handler() {
+      agentState.sendCommand(new Command({
+    },
+  });
+
+  useEffect(() => {
+    if (agentState.state.copilotkit?.actions) {
+      console.log(agentState.state.copilotkit.actions);
+    }
+  }, [agentState.state.copilotkit?.actions]);
 
   return (
     <div className="flex flex-row gap-4">
