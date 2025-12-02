@@ -14,6 +14,7 @@ import type { AgentState } from "../../../../../agent/src/single-agent/state";
 
 export function CopilotKit() {
   const chat = useCopilotChat();
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const agentState = useCoAgent<AgentState>({
     name: "single-agent",
   });
@@ -24,15 +25,39 @@ export function CopilotKit() {
       console.log(args.event);
       if (args.event.value === "__interrupt_required_resource_uri") {
         return (
-          <>
-            <p>Start by uploading the PDF file to ingest</p>
-            <FileUpload
-              accept=".pdf"
-              onUploaded={(data) => {
-                args.resolve(data.url);
-              }}
-            />
-          </>
+          <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="shrink-0">
+                <svg
+                  className="w-5 h-5 text-blue-600 dark:text-blue-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                  />
+                </svg>
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+                  Upload PDF to Start Learning
+                </h3>
+              </div>
+            </div>
+            <div className="shrink-0 ml-4">
+              <FileUpload
+                accept=".pdf"
+                onUploaded={(data) => {
+                  args.resolve(data.url);
+                }}
+              />
+            </div>
+          </div>
         );
       }
       return "";
@@ -287,12 +312,6 @@ export function CopilotKit() {
                 {isCorrect ? "Correct!" : "Incorrect"}
               </span>
             </div>
-            {!isCorrect && (
-              <p className="text-sm text-gray-700 mb-2">
-                <span className="font-medium">Correct answer:</span>{" "}
-                {result.correctAnswer || args.correctAnswer}
-              </p>
-            )}
           </div>
         ) as React.ReactElement;
       }
@@ -452,57 +471,16 @@ export function CopilotKit() {
         ) as React.ReactElement;
       }
       if (status === "complete" && result) {
-        const performance = (result.performance || args.performance) as {
-          totalQuestions: number;
-          correctAnswers: number;
-          incorrectAnswers: number;
-        };
         const studyTips = result.studyTips || args.studyTips;
         const summary = result.summary || args.summary;
-        const accuracy =
-          performance?.totalQuestions > 0
-            ? (
-                (performance.correctAnswers / performance.totalQuestions) *
-                100
-              ).toFixed(1)
-            : "0";
+
         return (
           <div className="p-6 border rounded-lg bg-linear-to-br from-purple-50 to-blue-50 border-purple-300 mb-4">
             <div className="flex items-center gap-2 mb-4">
               <span className="text-2xl">🎓</span>
               <h3 className="text-xl font-bold">Session Summary</h3>
             </div>
-            {performance && (
-              <div className="mb-4 p-4 bg-white rounded-lg">
-                <h4 className="font-semibold mb-3">Performance</h4>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-gray-600">Total Questions:</span>{" "}
-                    <span className="font-semibold">
-                      {performance.totalQuestions}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Correct:</span>{" "}
-                    <span className="font-semibold text-green-600">
-                      {performance.correctAnswers}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Incorrect:</span>{" "}
-                    <span className="font-semibold text-red-600">
-                      {performance.incorrectAnswers}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="text-gray-600">Accuracy:</span>{" "}
-                    <span className="font-semibold text-blue-600">
-                      {accuracy}%
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
+
             {summary && (
               <div className="mb-4 p-4 bg-white rounded-lg">
                 <h4 className="font-semibold mb-2">Summary</h4>
@@ -535,17 +513,13 @@ export function CopilotKit() {
     );
   };
 
-  // ============================================================================
-  // RENDER
-  // ============================================================================
-
   return (
-    <div className="flex flex-row gap-4 h-screen">
+    <div className="flex flex-row mx-auto max-w-7xl gap-4 h-screen">
       <CopilotChat
         labels={{
           title: "Learning Assistant",
           initial:
-            "Hi! I'm your learning assistant. Upload a PDF to get started, and I'll help you learn through interactive quizzes!",
+            "Hi! I'm Boomrang, your learning assistant. I'll help you learn through interactive quizzes! Type 'start' to get started.",
         }}
       />
     </div>
