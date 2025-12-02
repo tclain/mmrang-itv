@@ -3,40 +3,28 @@
  * It defines the workflow graph, state, tools, nodes and edges.
  */
 
-import { z } from "zod";
-import { RunnableConfig } from "@langchain/core/runnables";
-import { tool } from "@langchain/core/tools";
-import { ToolNode } from "@langchain/langgraph/prebuilt";
 import { AIMessage, SystemMessage } from "@langchain/core/messages";
+import { RunnableConfig } from "@langchain/core/runnables";
 import {
   Command,
   END,
   interrupt,
-  MemorySaver,
   START,
   StateGraph,
 } from "@langchain/langgraph";
+import { z } from "zod";
 
-import {
-  convertActionsToDynamicStructuredTools,
-  CopilotKitStateAnnotation,
-} from "@copilotkit/sdk-js/langgraph";
+import { CopilotKitStateAnnotation } from "@copilotkit/sdk-js/langgraph";
 import { Annotation } from "@langchain/langgraph";
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
-import {
-  BaseCheckpointSaver,
-  Checkpoint,
-} from "@langchain/langgraph-checkpoint";
-import { readFile, readFileSync, writeFileSync } from "fs";
-import { RedisSaver } from "@langchain/langgraph-checkpoint-redis";
+import { readFileSync } from "fs";
 
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
 
-import { CanvasFactory } from "pdf-parse/worker";
-import { PDFParse } from "pdf-parse";
-import { join } from "path";
 import { copilotKitCustomizeConfig } from "@copilotkit/sdk-js/langchain";
+import { join } from "path";
+import { PDFParse } from "pdf-parse";
+import { CanvasFactory } from "pdf-parse/worker";
 
 // types and states
 type LearningPlan = {

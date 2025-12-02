@@ -9,7 +9,7 @@ import {
 } from "@copilotkit/react-core";
 import { CopilotChat } from "@copilotkit/react-ui";
 import { MessageRole, TextMessage } from "@copilotkit/runtime-client-gql";
-import { useMemo, useState } from "react";
+import React from "react";
 import type { AgentState } from "../../../../../agent/src/single-agent/state";
 
 export function CopilotKit() {
@@ -17,9 +17,6 @@ export function CopilotKit() {
   const agentState = useCoAgent<AgentState>({
     name: "single-agent",
   });
-
-  // Derive UI state from agent state
-  const state = agentState.state;
 
   // Handle LangGraph interrupts
   useLangGraphInterrupt({
@@ -39,103 +36,6 @@ export function CopilotKit() {
         );
       }
       return "";
-    },
-  });
-
-  const learningPlan = state.learningPlan;
-  const planApproved = state.planApproved;
-  const currentMcq = state.currentMcq;
-  const userAnswer = state.userAnswer;
-  const answerSubmitted = state.answerSubmitted;
-  const learningSession = state.learningSession;
-
-  // Derive learning plan state from agent state
-  const learningPlanState = useMemo(() => {
-    if (!learningPlan) return null;
-    return {
-      objectives: learningPlan.map((obj) => ({
-        topic: obj.topic,
-        difficulty: obj.difficulty,
-      })),
-      message: "", // Will be set by tool call
-      approved: planApproved,
-    };
-  }, [learningPlan, planApproved]);
-
-  // Derive summary state from learning session
-  const summaryState = useMemo(() => {
-    if (!learningSession?.performance) return null;
-    const { performance } = learningSession;
-    const accuracy =
-      performance.totalQuestions > 0
-        ? (performance.correctAnswers / performance.totalQuestions) * 100
-        : 0;
-    return {
-      performance: {
-        ...performance,
-        accuracy,
-      },
-      studyTips: [], // Will be populated by tool call
-      summary: "", // Will be populated by tool call
-    };
-  }, [learningSession]);
-
-  // Minimal local state for UI-only concerns (hints, explanations, feedback)
-  // These are set by tool calls but not stored in agent state
-  const [uiFeedback, setUiFeedback] = useState<{
-    isCorrect: boolean;
-    correctAnswer: string;
-    userAnswer: string;
-    explanation: string;
-    visualFeedback: "green" | "red";
-  } | null>(null);
-  const [uiHint, setUiHint] = useState<{
-    hint: string;
-    question: string;
-  } | null>(null);
-  const [uiExplanation, setUiExplanation] = useState<{
-    explanation: string;
-    question: string;
-  } | null>(null);
-  const [planMessage, setPlanMessage] = useState<string>("");
-  const [studyTips, setStudyTips] = useState<string[]>([]);
-  const [summaryText, setSummaryText] = useState<string>("");
-  //   const initializedRef = useRef(false);
-
-  //   // Initialize chat on mount (only once)
-  //   useEffect(() => {
-  //     if (!initializedRef.current && !agentState.state.messages?.length) {
-  //       initializedRef.current = true;
-  //       chat.appendMessage(
-  //         new TextMessage({
-  //           role: MessageRole.System,
-  //           content:
-  //             "Hi! I'm your learning assistant. Please upload a PDF to get started.",
-  //         })
-  //       );
-  //     }
-  //     // eslint-disable-next-line react-hooks/exhaustive-deps
-  //   }, []); // Only run on mount
-
-  // ============================================================================
-  // FRONTEND TOOLS - These are called by the agent
-  // ============================================================================
-
-  // Tool: Ingest PDF file
-  useFrontendTool({
-    name: "ingest_pdf",
-    description: "Ingest a PDF file for processing",
-    parameters: [
-      {
-        name: "pdfUrl",
-        type: "string",
-        description: "URL or path to the PDF file to ingest",
-        required: true,
-      },
-    ],
-    handler: async ({ pdfUrl: url }: { pdfUrl: string }) => {
-      // The agent will handle the actual PDF processing via state
-      return { success: true, message: `PDF ingested: ${url}` };
     },
   });
 
@@ -166,11 +66,63 @@ export function CopilotKit() {
       }>;
       message: string;
     }) => {
-      setPlanMessage(args.message);
       return {
         success: true,
-        message: "Learning plan presented to user",
+        statusMessage: "Learning plan presented to user",
+        objectives: args.objectives,
+        message: args.message,
       };
+    },
+    render: ({ args, status, result }) => {
+      if (status === "inProgress") {
+        return (
+          <div className="p-4 border rounded-lg bg-blue-50 animate-pulse">
+            <p className="text-sm text-gray-600">
+              Creating your learning plan...
+            </p>
+          </div>
+        ) as React.ReactElement;
+      }
+      if (status === "complete" && result) {
+        const objectives = (result.objectives || args.objectives) as Array<{
+          topic: string;
+          difficulty: "beginner" | "intermediate" | "advanced";
+        }>;
+        const message = result.message || args.message;
+        const difficultyColors = {
+          beginner: "bg-green-100 text-green-800",
+          intermediate: "bg-yellow-100 text-yellow-800",
+          advanced: "bg-red-100 text-red-800",
+        };
+        return (
+          <div className="p-4 border rounded-lg bg-blue-50 mb-4">
+            <h3 className="text-lg font-semibold mb-2">📚 Learning Plan</h3>
+            {message && <p className="mb-4 text-gray-700">{message}</p>}
+            <div className="mb-4">
+              <h4 className="font-semibold mb-2">Objectives:</h4>
+              <ul className="space-y-2">
+                {objectives.map((obj, idx: number) => (
+                  <li
+                    key={idx}
+                    className="flex items-center gap-2 p-2 bg-white rounded-md"
+                  >
+                    <span className="font-medium">{obj.topic}</span>
+                    <span
+                      className={`px-2 py-1 rounded text-xs font-semibold ${
+                        difficultyColors[obj.difficulty] ||
+                        difficultyColors.beginner
+                      }`}
+                    >
+                      {obj.difficulty}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        ) as React.ReactElement;
+      }
+      return <></>;
     },
   });
 
@@ -204,15 +156,54 @@ export function CopilotKit() {
         required: true,
       },
     ],
-    handler: async () => {
-      // Clear previous feedback/hints when new question is shown
-      setUiFeedback(null);
-      setUiHint(null);
-      setUiExplanation(null);
+    handler: async (args) => {
       return {
         success: true,
         message: "MCQ rendered",
+        question: args.question,
+        choices: args.choices,
+        objectiveTopic: args.objectiveTopic,
+        mcqIndex: args.mcqIndex,
       };
+    },
+    render: ({ args, status, result }) => {
+      if (status === "inProgress") {
+        return (
+          <div className="p-4 border rounded-lg bg-purple-50 animate-pulse">
+            <p className="text-sm text-gray-600">Preparing question...</p>
+          </div>
+        ) as React.ReactElement;
+      }
+      if (status === "complete" && result) {
+        const question = result.question || args.question;
+        const choices = result.choices || args.choices;
+        const topic = result.objectiveTopic || args.objectiveTopic;
+        return (
+          <div className="p-4 border rounded-lg bg-purple-50 mb-4">
+            <div className="mb-2">
+              <span className="text-xs text-gray-500 font-semibold">
+                Topic: {topic}
+              </span>
+            </div>
+            <h3 className="text-lg font-semibold mb-4">❓ {question}</h3>
+            <div className="space-y-2">
+              {choices.map((choice: string, idx: number) => (
+                <button
+                  onClick={() => handleMCQSelect(choice)}
+                  key={idx}
+                  className="p-3 bg-white border rounded-md hover:bg-gray-50 cursor-pointer transition-colors"
+                >
+                  <span className="font-medium mr-2">
+                    {String.fromCharCode(65 + idx)}.
+                  </span>
+                  {choice}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) as React.ReactElement;
+      }
+      return <></>;
     },
   });
 
@@ -260,17 +251,52 @@ export function CopilotKit() {
       explanation: string;
       visualFeedback: string;
     }) => {
-      setUiFeedback({
-        isCorrect: args.isCorrect,
-        correctAnswer: args.correctAnswer,
-        userAnswer: args.userAnswer,
-        explanation: args.explanation,
-        visualFeedback: args.visualFeedback as "green" | "red",
-      });
       return {
         success: true,
         message: "Feedback provided",
+        ...args,
       };
+    },
+    render: ({ args, status, result }) => {
+      if (status === "inProgress") {
+        return (
+          <div className="p-3 border rounded-lg bg-gray-50 animate-pulse">
+            <p className="text-sm text-gray-600">Evaluating your answer...</p>
+          </div>
+        ) as React.ReactElement;
+      }
+      if (status === "complete" && result) {
+        const isCorrect = result.isCorrect ?? args.isCorrect;
+        const visualFeedback = result.visualFeedback || args.visualFeedback;
+        const isGreen = visualFeedback === "green" || isCorrect;
+        return (
+          <div
+            className={`p-4 rounded-lg border-2 mb-4 ${
+              isGreen
+                ? "bg-green-50 border-green-300"
+                : "bg-red-50 border-red-300"
+            }`}
+          >
+            <div className="flex items-center gap-2 mb-2">
+              {isGreen ? (
+                <span className="text-2xl">✅</span>
+              ) : (
+                <span className="text-2xl">❌</span>
+              )}
+              <span className="font-semibold text-lg">
+                {isCorrect ? "Correct!" : "Incorrect"}
+              </span>
+            </div>
+            {!isCorrect && (
+              <p className="text-sm text-gray-700 mb-2">
+                <span className="font-medium">Correct answer:</span>{" "}
+                {result.correctAnswer || args.correctAnswer}
+              </p>
+            )}
+          </div>
+        ) as React.ReactElement;
+      }
+      return <></>;
     },
   });
 
@@ -293,11 +319,34 @@ export function CopilotKit() {
       },
     ],
     handler: async ({ hint, question }: { hint: string; question: string }) => {
-      setUiHint({ hint, question });
       return {
         success: true,
         message: "Hint displayed",
+        hint,
+        question,
       };
+    },
+    render: ({ args, status, result }) => {
+      if (status === "inProgress") {
+        return (
+          <div className="p-3 border rounded-lg bg-yellow-50 animate-pulse">
+            <p className="text-sm text-gray-600">Generating hint...</p>
+          </div>
+        ) as React.ReactElement;
+      }
+      if (status === "complete" && result) {
+        const hint = result.hint || args.hint;
+        return (
+          <div className="p-4 border rounded-lg bg-yellow-50 border-yellow-300 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xl">💡</span>
+              <span className="font-semibold">Hint</span>
+            </div>
+            <p className="text-gray-700">{hint}</p>
+          </div>
+        ) as React.ReactElement;
+      }
+      return <></>;
     },
   });
 
@@ -326,11 +375,34 @@ export function CopilotKit() {
       explanation: string;
       question: string;
     }) => {
-      setUiExplanation({ explanation, question });
       return {
         success: true,
         message: "Explanation displayed",
+        explanation,
+        question,
       };
+    },
+    render: ({ args, status, result }) => {
+      if (status === "inProgress") {
+        return (
+          <div className="p-3 border rounded-lg bg-blue-50 animate-pulse">
+            <p className="text-sm text-gray-600">Preparing explanation...</p>
+          </div>
+        ) as React.ReactElement;
+      }
+      if (status === "complete" && result) {
+        const explanation = result.explanation || args.explanation;
+        return (
+          <div className="p-4 border rounded-lg bg-blue-50 border-blue-300 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xl">📚</span>
+              <span className="font-semibold">Explanation</span>
+            </div>
+            <p className="text-gray-700">{explanation}</p>
+          </div>
+        ) as React.ReactElement;
+      }
+      return <></>;
     },
   });
 
@@ -363,29 +435,96 @@ export function CopilotKit() {
       studyTips: string[];
       summary: string;
     }) => {
-      setStudyTips(args.studyTips);
-      setSummaryText(args.summary);
       return {
         success: true,
         message: "Results summarized",
+        performance: args.performance,
+        studyTips: args.studyTips,
+        summary: args.summary,
       };
     },
+    render: ({ args, status, result }) => {
+      if (status === "inProgress") {
+        return (
+          <div className="p-4 border rounded-lg bg-purple-50 animate-pulse">
+            <p className="text-sm text-gray-600">Generating your summary...</p>
+          </div>
+        ) as React.ReactElement;
+      }
+      if (status === "complete" && result) {
+        const performance = (result.performance || args.performance) as {
+          totalQuestions: number;
+          correctAnswers: number;
+          incorrectAnswers: number;
+        };
+        const studyTips = result.studyTips || args.studyTips;
+        const summary = result.summary || args.summary;
+        const accuracy =
+          performance?.totalQuestions > 0
+            ? (
+                (performance.correctAnswers / performance.totalQuestions) *
+                100
+              ).toFixed(1)
+            : "0";
+        return (
+          <div className="p-6 border rounded-lg bg-linear-to-br from-purple-50 to-blue-50 border-purple-300 mb-4">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="text-2xl">🎓</span>
+              <h3 className="text-xl font-bold">Session Summary</h3>
+            </div>
+            {performance && (
+              <div className="mb-4 p-4 bg-white rounded-lg">
+                <h4 className="font-semibold mb-3">Performance</h4>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-gray-600">Total Questions:</span>{" "}
+                    <span className="font-semibold">
+                      {performance.totalQuestions}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Correct:</span>{" "}
+                    <span className="font-semibold text-green-600">
+                      {performance.correctAnswers}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Incorrect:</span>{" "}
+                    <span className="font-semibold text-red-600">
+                      {performance.incorrectAnswers}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">Accuracy:</span>{" "}
+                    <span className="font-semibold text-blue-600">
+                      {accuracy}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+            {summary && (
+              <div className="mb-4 p-4 bg-white rounded-lg">
+                <h4 className="font-semibold mb-2">Summary</h4>
+                <p className="text-gray-700">{summary}</p>
+              </div>
+            )}
+            {studyTips && studyTips.length > 0 && (
+              <div className="p-4 bg-white rounded-lg">
+                <h4 className="font-semibold mb-2">💡 Study Tips</h4>
+                <ul className="list-disc list-inside space-y-1 text-sm text-gray-700">
+                  {studyTips.map((tip: string, idx: number) => (
+                    <li key={idx}>{tip}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        ) as React.ReactElement;
+      }
+      return <></>;
+    },
   });
-
-  // ============================================================================
-  // HANDLERS
-  // ============================================================================
-
-  const handleMCQSubmit = (selectedAnswer: string) => {
-    if (!currentMcq || !selectedAnswer) return;
-    // Send user's answer to the agent via chat
-    chat.appendMessage(
-      new TextMessage({
-        role: MessageRole.User,
-        content: `I selected: ${selectedAnswer}`,
-      })
-    );
-  };
 
   const handleMCQSelect = (selectedAnswer: string) => {
     chat.appendMessage(
@@ -396,235 +535,19 @@ export function CopilotKit() {
     );
   };
 
-  const handleLearningPlanApproval = (approved: boolean) => {
-    agentState.setState({
-      ...state,
-      planApproved: approved,
-    });
-    chat.appendMessage(
-      new TextMessage({
-        role: MessageRole.User,
-        content: approved
-          ? "Yes, I approve the learning plan."
-          : "No, I'd like to revise the plan.",
-      })
-    );
-  };
-
   // ============================================================================
   // RENDER
   // ============================================================================
 
   return (
     <div className="flex flex-row gap-4 h-screen">
-      {/* Left Panel: Learning Plan & Progress */}
-      <div className="flex-1 overflow-y-auto p-4 border-r">
-        <h2 className="text-2xl font-bold mb-4">Learning Assistant</h2>
-
-        {/* <pre className="text-xs">
-          {JSON.stringify(
-            {
-              ...state,
-              copilotkit: { ...state.copilotkit, actions: undefined },
-            },
-            null,
-            2
-          )}
-        </pre> */}
-
-        {/* Learning Plan Approval */}
-        {learningPlanState && planApproved === null && (
-          <div className="mb-6 p-4 border rounded-lg bg-blue-50">
-            <h3 className="text-lg font-semibold mb-2">Learning Plan</h3>
-            {planMessage && <p className="mb-4">{planMessage}</p>}
-            <div className="mb-4">
-              <h4 className="font-semibold mb-2">Objectives:</h4>
-              <ul className="list-disc list-inside space-y-1">
-                {learningPlanState.objectives.map((obj, idx) => (
-                  <li key={idx}>
-                    <span className="font-medium">{obj.topic}</span> (
-                    <span className="text-sm text-gray-600">
-                      {obj.difficulty}
-                    </span>
-                    )
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleLearningPlanApproval(true)}
-                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-              >
-                Approve
-              </button>
-              <button
-                onClick={() => handleLearningPlanApproval(false)}
-                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700"
-              >
-                Revise
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Learning Plan Progress */}
-        {learningPlan && planApproved && (
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold mb-2">Learning Progress</h3>
-            <ul className="space-y-2">
-              {learningPlan.map((objective, idx) => (
-                <li
-                  key={idx}
-                  className={`flex items-center gap-2 p-2 rounded ${
-                    objective.completed ? "bg-green-100" : "bg-gray-100"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={objective.completed}
-                    readOnly
-                    className="cursor-default"
-                  />
-                  <span className="flex-1">
-                    <span className="font-medium">{objective.topic}</span>
-                    <span className="text-sm text-gray-600 ml-2">
-                      ({objective.difficulty})
-                    </span>
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* MCQ Widget */}
-        {currentMcq && (
-          <div className="mb-6 p-4 border rounded-lg">
-            <h3 className="text-lg font-semibold mb-2">Question</h3>
-            <p className="mb-4 font-medium">{currentMcq.question}</p>
-
-            <div className="space-y-2 mb-4">
-              {currentMcq.choices.map((choice, idx) => (
-                <label
-                  key={idx}
-                  className={`flex items-center p-3 border rounded-md cursor-pointer transition-colors ${
-                    userAnswer === choice
-                      ? "bg-blue-100 border-blue-500"
-                      : "hover:bg-gray-50"
-                  } ${
-                    uiFeedback && uiFeedback.userAnswer === choice
-                      ? uiFeedback.visualFeedback === "green"
-                        ? "bg-green-200 border-green-500"
-                        : "bg-red-200 border-red-500"
-                      : ""
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="mcq-choice"
-                    value={choice}
-                    checked={userAnswer === choice}
-                    onChange={(e) => handleMCQSelect(e.target.value)}
-                    disabled={answerSubmitted}
-                    className="mr-3"
-                  />
-                  <span>{choice}</span>
-                </label>
-              ))}
-            </div>
-
-            {!answerSubmitted && userAnswer && (
-              <button
-                onClick={() => handleMCQSubmit(userAnswer)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-              >
-                Submit Answer
-              </button>
-            )}
-
-            {/* Feedback */}
-            {uiFeedback && (
-              <div
-                className={`mt-4 p-3 rounded-md ${
-                  uiFeedback.visualFeedback === "green"
-                    ? "bg-green-100 border border-green-300"
-                    : "bg-red-100 border border-red-300"
-                }`}
-              >
-                <p className="font-semibold mb-2">
-                  {uiFeedback.isCorrect ? "✓ Correct!" : "✗ Incorrect"}
-                </p>
-                <p className="text-sm">{uiFeedback.explanation}</p>
-              </div>
-            )}
-
-            {/* Hint */}
-            {uiHint && (
-              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-300 rounded-md">
-                <p className="font-semibold mb-2">💡 Hint</p>
-                <p className="text-sm">{uiHint.hint}</p>
-              </div>
-            )}
-
-            {/* Explanation */}
-            {uiExplanation && (
-              <div className="mt-4 p-3 bg-blue-50 border border-blue-300 rounded-md">
-                <p className="font-semibold mb-2">📚 Explanation</p>
-                <p className="text-sm">{uiExplanation.explanation}</p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Summary */}
-        {summaryState && (
-          <div className="mb-6 p-4 border rounded-lg bg-purple-50">
-            <h3 className="text-lg font-semibold mb-2">Session Summary</h3>
-            <div className="mb-4">
-              <h4 className="font-semibold mb-2">Performance:</h4>
-              <ul className="text-sm space-y-1">
-                <li>
-                  Total Questions: {summaryState.performance.totalQuestions}
-                </li>
-                <li>
-                  Correct: {summaryState.performance.correctAnswers} |
-                  Incorrect: {summaryState.performance.incorrectAnswers}
-                </li>
-                <li>
-                  Accuracy: {summaryState.performance.accuracy.toFixed(1)}%
-                </li>
-              </ul>
-            </div>
-            {summaryText && (
-              <div className="mb-4">
-                <p className="text-sm">{summaryText}</p>
-              </div>
-            )}
-            {studyTips.length > 0 && (
-              <div>
-                <h4 className="font-semibold mb-2">Study Tips:</h4>
-                <ul className="list-disc list-inside text-sm space-y-1">
-                  {studyTips.map((tip, idx) => (
-                    <li key={idx}>{tip}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Right Panel: Chat */}
-      <div className="flex-1">
-        <CopilotChat
-          labels={{
-            title: "Learning Assistant",
-            initial:
-              "Hi! I'm your learning assistant. Upload a PDF to get started, and I'll help you learn through interactive quizzes!",
-          }}
-        />
-      </div>
+      <CopilotChat
+        labels={{
+          title: "Learning Assistant",
+          initial:
+            "Hi! I'm your learning assistant. Upload a PDF to get started, and I'll help you learn through interactive quizzes!",
+        }}
+      />
     </div>
   );
 }
